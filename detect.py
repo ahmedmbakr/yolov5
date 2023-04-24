@@ -1,32 +1,4 @@
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
-"""
-Run YOLOv5 detection inference on images, videos, directories, globs, YouTube, webcam, streams, etc.
-
-Usage - sources:
-    $ python detect.py --weights yolov5s.pt --source 0                               # webcam
-                                                     img.jpg                         # image
-                                                     vid.mp4                         # video
-                                                     screen                          # screenshot
-                                                     path/                           # directory
-                                                     list.txt                        # list of images
-                                                     list.streams                    # list of streams
-                                                     'path/*.jpg'                    # glob
-                                                     'https://youtu.be/Zgi9g1ksQHc'  # YouTube
-                                                     'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP stream
-
-Usage - formats:
-    $ python detect.py --weights yolov5s.pt                 # PyTorch
-                                 yolov5s.torchscript        # TorchScript
-                                 yolov5s.onnx               # ONNX Runtime or OpenCV DNN with --dnn
-                                 yolov5s_openvino_model     # OpenVINO
-                                 yolov5s.engine             # TensorRT
-                                 yolov5s.mlmodel            # CoreML (macOS-only)
-                                 yolov5s_saved_model        # TensorFlow SavedModel
-                                 yolov5s.pb                 # TensorFlow GraphDef
-                                 yolov5s.tflite             # TensorFlow Lite
-                                 yolov5s_edgetpu.tflite     # TensorFlow Edge TPU
-                                 yolov5s_paddle_model       # PaddlePaddle
-"""
 
 import argparse
 import os
@@ -51,12 +23,8 @@ from utils.torch_utils import select_device, smart_inference_mode
 
 class YoloDetect:
 
-    def __init__(self):
-        pass
-
-    @smart_inference_mode()
-    def run(self,
-            weights=ROOT / 'conesbest.pt',  # model path or triton URL
+    def __init__(self,
+            weights=ROOT / 'weights/conesbest.pt',  # model path or triton URL
             source=ROOT / 'data/images',  # file/dir/URL/glob/screen/0(webcam)
             data=ROOT / 'data/coco128.yaml',  # dataset.yaml path
             imgsz=(640, 640),  # inference size (height, width)
@@ -65,7 +33,6 @@ class YoloDetect:
             max_det=1000,  # maximum detections per image
             device='',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
             save_txt=False,  # save results to *.txt
-            save_conf=False,  # save confidences in --save-txt labels
             nosave=False,  # do not save images/videos
             classes=None,  # filter by class: --class 0, or --class 0 2 3
             agnostic_nms=False,  # class-agnostic NMS
@@ -81,87 +48,115 @@ class YoloDetect:
             dnn=False,  # use OpenCV DNN for ONNX inference
             vid_stride=1,  # video frame-rate stride
     ):
+        self.weights = weights
+        self.source = source
+        self.data = data
+        self.imgsz = imgsz
+        self.conf_thres = conf_thres
+        self.iou_thres = iou_thres
+        self.max_det = max_det
+        self.device = device
+        self.save_txt = save_txt
+        self.nosave = nosave
+        self.classes = classes
+        self.agnostic_nms = agnostic_nms
+        self.augment = augment
+        self.visualize = visualize
+        self.project = project
+        self.name = name
+        self.exist_ok = exist_ok
+        self.line_thickness = line_thickness
+        self.hide_labels = hide_labels
+        self.hide_conf = hide_conf
+        self.half = half
+        self.dnn = dnn
+        self.vid_stride = vid_stride
+
         source = str(source)
-        save_img = not nosave and not source.endswith('.txt')  # save inference images
+        self.save_img = not nosave and not source.endswith('.txt')  # save inference images
 
         # Directories
-        save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
-        (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
+        self.save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
+        (self.save_dir / 'labels' if save_txt else self.save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
         device = select_device(device)
-        model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
-        stride, names, pt = model.stride, model.names, model.pt
+        self.model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
+        stride, self.names, pt = self.model.stride, self.model.names, self.model.pt
         imgsz = check_img_size(imgsz, s=stride)  # check image size
 
         # Dataloader
         bs = 1  # batch_size
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+        self.dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
 
         # Run inference
-        model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
+        self.model.warmup(imgsz=(1 if pt or self.model.triton else bs, 3, *imgsz))  # warmup
+
+    @smart_inference_mode()
+    def run(self):
+        
         seen, windows, dt = 1, [], (Profile(), Profile(), Profile())
-        for path, im, im0s, vid_cap, s in dataset:
-            self.run_on_image(conf_thres, iou_thres, max_det, classes, agnostic_nms, augment, visualize, line_thickness, hide_labels, hide_conf, save_img, save_dir, model, names, dataset, seen, dt, path, im, im0s, s)
+        for path, im, im0s, vid_cap, s in self.dataset:
+            self.run_on_image(seen, dt, path, im, im0s, s)
             seen += 1
 
         # Print results
-        if save_txt or save_img:
-            s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
-            LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
+        if self.save_txt or self.save_img:
+            s = f"\n{len(list(self.save_dir.glob('labels/*.txt')))} labels saved to {self.save_dir / 'labels'}" if self.save_txt else ''
+            LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}{s}")
 
-    def run_on_image(self, conf_thres, iou_thres, max_det, classes, agnostic_nms, augment, visualize, line_thickness, hide_labels, hide_conf, save_img, save_dir, model, names, dataset, seen, dt, path, im, im0s, s):
+    def run_on_image(self, seen, dt, path, im, im0s, s):
         with dt[0]:
-            im = torch.from_numpy(im).to(model.device)
-            im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
+            im = torch.from_numpy(im).to(self.model.device)
+            im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
             im /= 255  # 0 - 255 to 0.0 - 1.0
             if len(im.shape) == 3:
                 im = im[None]  # expand for batch dim
 
-            # Inference
+        # Inference
         with dt[1]:
-            visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-            pred = model(im, augment=augment, visualize=visualize)
+            visualize = increment_path(self.save_dir / Path(path).stem, mkdir=True) if self.visualize else False
+            pred = self.model(im, augment=self.augment, visualize=visualize)
 
             # NMS
         with dt[2]:
-            pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+            pred = non_max_suppression(pred, self.conf_thres, self.iou_thres, self.classes, self.agnostic_nms, max_det=self.max_det)
 
             # Second-stage classifier (optional)
             # pred = utils.general.apply_classifier(pred, classifier_model, im, im0s)
 
-            # Process predictions
+        # Process predictions
         for _, det in enumerate(pred):  # per image
-            p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
+            p, im0, frame = path, im0s.copy(), getattr(self.dataset, 'frame', 0)
 
             p = Path(p)  # to Path
-            save_path = str(save_dir / p.name)  # im.jpg
+            save_path = str(self.save_dir / p.name)  # im.jpg
             s += '%gx%g ' % im.shape[2:]  # print string
-            annotator = Annotator(im0, line_width=line_thickness, example=str(names))
+            annotator = Annotator(im0, line_width=self.line_thickness, example=str(self.names))
             if len(det):
-                    # Rescale boxes from img_size to im0 size
+                # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
 
-                    # Print results
+                # Print results
                 for c in det[:, 5].unique():
                     n = (det[:, 5] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    s += f"{n} {self.names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
-                    # Write results
+                # Write results
                 for *xyxy, conf, cls in reversed(det):
-                    if save_img:  # Add bbox to image
+                    if self.save_img:  # Add bbox to image
                         c = int(cls)  # integer class
-                        label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                        label = None if self.hide_labels else (self.names[c] if self.hide_conf else f'{self.names[c]} {conf:.2f}')
                         annotator.box_label(xyxy, label, color=colors(c, True))
 
-                # Stream results
+            # Stream results
             im0 = annotator.result()
 
-                # Save results (image with detections)
-            if save_img:
+            # Save results (image with detections)
+            if self.save_img:
                 cv2.imwrite(save_path, im0)
 
-            # Print time (inference-only)
+        # Print time (inference-only)
         LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{dt[1].dt * 1E3:.1f}ms")
         t = tuple(x.t / seen * 1E3 for x in dt)  # speeds per image
         LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image {(1, 3)}' % t)
@@ -178,7 +173,6 @@ def parse_opt():
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
-    parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
     parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
@@ -201,8 +195,8 @@ def parse_opt():
 
 def main(opt):
     check_requirements(exclude=('tensorboard', 'thop'))
-    yolo_detect = YoloDetect()
-    yolo_detect.run(**vars(opt))
+    yolo_detect = YoloDetect(**vars(opt))
+    yolo_detect.run()
 
 
 if __name__ == '__main__':
