@@ -77,7 +77,9 @@ Clone repo and install [requirements.txt](https://github.com/ultralytics/yolov5/
 ```bash
 git clone https://github.com/ultralytics/yolov5  # clone
 cd yolov5
-pip install -r requirements.txt  # install
+conda env create -f environment.yaml # install
+conda activate yolov5  # activate
+python detect.py # detects objects in images/ directory and generates the output in runs/detect/exp
 ```
 
 </details>

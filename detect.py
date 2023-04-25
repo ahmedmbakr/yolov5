@@ -20,6 +20,8 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
                            increment_path, non_max_suppression, print_args, scale_boxes, strip_optimizer, xyxy2xywh)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, smart_inference_mode
+from utils.augmentations import letterbox
+import numpy as np
 
 class YoloDetect:
 
@@ -72,8 +74,8 @@ class YoloDetect:
         self.dnn = dnn
         self.vid_stride = vid_stride
 
-        source = str(source)
-        self.save_img = not nosave and not source.endswith('.txt')  # save inference images
+        self.source = str(source)
+        self.save_img = not nosave and not self.source.endswith('.txt')  # save inference images
 
         # Directories
         self.save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
@@ -87,17 +89,33 @@ class YoloDetect:
 
         # Dataloader
         bs = 1  # batch_size
-        self.dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+        self.dataset = LoadImages(self.source, img_size=self.imgsz, stride=self.model.stride, auto=self.model.pt, vid_stride=self.vid_stride)
 
         # Run inference
         self.model.warmup(imgsz=(1 if pt or self.model.triton else bs, 3, *imgsz))  # warmup
 
+    def run_test(self):
+        import glob
+        directory = self.source
+        png_files = glob.glob(directory)
+        for idx, img_full_path in enumerate(png_files, 1):
+            cv2_image_bgr = cv2.imread(img_full_path)
+            self.run(cv2_image_bgr, idx, img_full_path)
+
+
+    def run(self, cv2_image_bgr, img_num=1, full_path='img.png', stride=32):
+        im = letterbox(cv2_image_bgr, self.imgsz[0], stride=stride, auto=True)[0]  # padded resize
+        im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+        im = np.ascontiguousarray(im)  # contiguous
+        dt = (Profile(), Profile(), Profile())
+        s = str(full_path)
+        self.__run_on_image(im, cv2_image_bgr, img_num, dt, full_path, s)
+
     @smart_inference_mode()
-    def run(self):
-        
+    def run_test_original(self):
         seen, windows, dt = 1, [], (Profile(), Profile(), Profile())
         for path, im, im0s, vid_cap, s in self.dataset:
-            self.run_on_image(seen, dt, path, im, im0s, s)
+            self.__run_on_image(im, im0s, seen, dt, path, s)
             seen += 1
 
         # Print results
@@ -105,7 +123,7 @@ class YoloDetect:
             s = f"\n{len(list(self.save_dir.glob('labels/*.txt')))} labels saved to {self.save_dir / 'labels'}" if self.save_txt else ''
             LOGGER.info(f"Results saved to {colorstr('bold', self.save_dir)}{s}")
 
-    def run_on_image(self, seen, dt, path, im, im0s, s):
+    def __run_on_image(self, im, im0s, seen, dt, path, s):
         with dt[0]:
             im = torch.from_numpy(im).to(self.model.device)
             im = im.half() if self.model.fp16 else im.float()  # uint8 to fp16/32
@@ -196,7 +214,8 @@ def parse_opt():
 def main(opt):
     check_requirements(exclude=('tensorboard', 'thop'))
     yolo_detect = YoloDetect(**vars(opt))
-    yolo_detect.run()
+    # yolo_detect.run_test_original()
+    yolo_detect.run_test()
 
 
 if __name__ == '__main__':
